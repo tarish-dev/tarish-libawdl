@@ -73,3 +73,80 @@ fn undocumented_tags_are_preserved_not_discarded() {
         assert_eq!(libawdl::tlv::tag_name(t), "unrecognised");
     }
 }
+
+/// The timing claims from the 2018 paper, checked against a 2026 device.
+///
+/// The paper is eight years old and its claims are assumptions until a capture says
+/// otherwise. These two hold. Cross-checked with `tshark -V`: `Availability Window
+/// Period: 16 TU` in all 278 frames of the capture, and `Number of Channels (+1): 15`.
+#[test]
+fn availability_window_and_sequence_length_match_the_paper() {
+    let sp = sync_params();
+    assert_eq!(sp.aw_period, 16, "16 TU, as Stute et al. describe");
+    assert_eq!(sp.aw_period_us(), 16_384, "1 TU is 1024 us, not 1000");
+
+    let seq = sp.channel_sequence.as_ref().expect("tag 4 embeds its own sequence");
+    assert_eq!(seq.channels.len(), 16, "16 slots");
+}
+
+/// One frame describes its schedule TWICE, in two different encodings.
+///
+/// Tag 4 embeds a `Legacy` sequence; tag 18 carries an `OpClass` one for the same
+/// frame. They are not copies: where Legacy says 151, OpClass says 149 or 153 — the
+/// 40 MHz centre against the 20 MHz control channel. Reading only one gives a
+/// self-consistent and incomplete picture of where the peer actually listens.
+#[test]
+fn the_two_channel_sequences_agree_on_occupancy_and_differ_on_channel() {
+    let pkt = fixture_frame::FRAME;
+    let rt = Radiotap::parse(pkt).unwrap();
+    let b = rt.payload(pkt).unwrap();
+    let d = Dot11::parse(b).unwrap();
+    let af = ActionFrame::parse(d.body(b).unwrap()).unwrap();
+
+    let embedded = sync_params().channel_sequence.expect("tag 4 sequence");
+    let standalone = af
+        .tlvs()
+        .find(|t| t.tag == 18)
+        .and_then(|t| libawdl::sync::ChannelSequence::parse(t.value))
+        .expect("tag 18 sequence");
+
+    assert_eq!(embedded.encoding, libawdl::sync::ChanEncoding::Legacy);
+    assert_eq!(standalone.encoding, libawdl::sync::ChanEncoding::OpClass);
+
+    // Same schedule: the node is present in the same windows either way.
+    assert_eq!(
+        embedded.occupied_slots(),
+        standalone.occupied_slots(),
+        "both sequences describe the same windows"
+    );
+}
+
+/// A device is absent for most of its own schedule.
+///
+/// Occupancy across the capture ran from 3/16 to 9/16 slots. That is the number that
+/// decides whether two peers can talk: they need windows where both are present AND on
+/// the same channel, so a node at 3/16 sets a hard ceiling on any peer's throughput
+/// regardless of link rate.
+#[test]
+fn most_slots_are_empty_and_that_is_normal() {
+    let seq = sync_params().channel_sequence.expect("tag 4 sequence");
+    let occupied = seq.occupied_slots();
+    assert!(occupied > 0, "a node present in no window at all would be undiscoverable");
+    assert!(
+        occupied < seq.channels.len(),
+        "empty slots are the norm, not a parse failure — observed 3/16 to 9/16"
+    );
+    assert!(!seq.distinct().contains(&0), "channel 0 means absent, not a channel");
+}
+
+fn sync_params() -> libawdl::sync::SyncParams {
+    let pkt = fixture_frame::FRAME;
+    let rt = Radiotap::parse(pkt).unwrap();
+    let b = rt.payload(pkt).unwrap();
+    let d = Dot11::parse(b).unwrap();
+    let af = ActionFrame::parse(d.body(b).unwrap()).unwrap();
+    af.tlvs()
+        .find(|t| t.tag == 4)
+        .and_then(|t| libawdl::sync::SyncParams::parse(t.value))
+        .expect("every frame in the capture carries tag 4")
+}

@@ -31,6 +31,7 @@
 pub mod action;
 pub mod dot11;
 pub mod radiotap;
+pub mod sync;
 pub mod tlv;
 
 /// Little-endian readers that return None rather than panicking at the end of a slice.

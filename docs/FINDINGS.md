@@ -89,6 +89,69 @@ Zero unaccounted for. The lesson is worth keeping: a classifier that cannot dist
 "too short for the header I wanted" from "not 802.11" will make a healthy capture look
 broken.
 
+## 6. The paper's timing claims hold on 2026 devices — and there is more in the frame than it describes
+
+`captures/awdl-149.pcap`, all 278 AWDL frames. Cross-checked against `tshark -V`.
+
+| Claim (Stute et al., 2018) | Verdict | Evidence |
+|---|---|---|
+| Availability Window is 16 TU | **confirmed** | `aw_period = 16` in 278/278 frames; 16 x 1024 = 16384 us |
+| Channel sequence has 16 slots | **confirmed** | count field is 15, and the count is stored **minus one** |
+| Social channels 6 / 44 / 149 | **confirmed for this region** | only 6 and 149 in use; 44 never appears, consistent with Qatar mapping to 149 |
+
+### A frame carries its schedule TWICE, in two different encodings
+
+This is not in the paper and is the kind of thing that makes an implementation subtly
+wrong rather than broken. **Synchronization Parameters (tag 4) embeds a complete channel
+sequence of its own**, in addition to the standalone Channel Sequence (tag 18). In the
+same frame:
+
+```
+tag 4  (Legacy encoding)    0, 0, 151, 0, 0, 151, 0, 0, 6, 0, 151, 0, 0, 151, 0, 0
+tag 18 (OpClass encoding)   0, 0, 149, 0, 0, 149, 0, 0, 6, 0, 149, 0, 0, 149, 0, 0
+```
+
+Identical occupancy, different channel numbers: **151 is the 40 MHz centre, 149 and 153
+are its 20 MHz halves.** The two encodings also order their bytes differently — Legacy is
+`flags, channel`, OpClass is `channel, opclass` — so reading one as the other produces
+plausible garbage rather than an error.
+
+Occupancy matched slot-for-slot across the whole capture (3/16, 4/16, 5/16, 6/16 and 9/16,
+with identical frame counts on both), which is what establishes they describe one schedule
+rather than two.
+
+### A device is absent for most of its own schedule
+
+Occupancy ranged from **3 of 16 slots to 9 of 16**. Channel 0 means "not present", and
+most slots are 0.
+
+This is the number that governs throughput between two peers, and it is not the link rate.
+Two nodes can only exchange anything during windows where **both** are present **and** on
+the same channel. A peer at 3/16 imposes a hard ceiling of 18% of airtime on anyone
+talking to it, however fast the modulation.
+
+It also explains the earlier iPhone measurement from the Android work — 4 of 16 slots
+split across 149 and 6, against our own devices at 16/16 on one channel, giving roughly
+19% overlap and 2.6-4.7 MB/s. That figure was previously attributed to the radio. It is
+the schedule.
+
+### `AP Beacon alignment delta` exists
+
+A named field in Synchronization Parameters, immediately after the AW sequence number.
+**There is no reason to carry an access point's beacon offset unless you intend to line
+up with it**, which is direct evidence that AWDL is designed to time-share with an
+infrastructure association rather than merely tolerate one — the question the research
+brief flags as highest value.
+
+It was **0 in all 278 frames**, consistent with these particular devices not currently
+time-sharing with an AP. That is a measurement to repeat against a device that
+demonstrably is, and until then the field's existence is the finding, not its value.
+
+**What this does NOT yet show.** Channel 153 appears in some sequences alongside 149, and
+there is an AP on 153 nearby, so it is tempting to read that as the AP's channel appearing
+in the slots. It is more likely the other half of the 149+153 bond centred on 151 — the
+Legacy sequence reports 151 in exactly those slots. Not claimed either way.
+
 ---
 
 ## Setup, and the one trap in it
