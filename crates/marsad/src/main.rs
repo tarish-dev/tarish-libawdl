@@ -13,28 +13,33 @@
 
 use std::collections::BTreeMap;
 
-use awdl::{action::ActionFrame, dot11::Dot11, radiotap::Radiotap, tlv::Stop};
+use awdl::{action::ActionFrame, dot11::{Dot11, FrameControl}, radiotap::Radiotap, tlv::Stop};
 
 /// What one captured frame turned out to be.
 enum Seen<'a> {
-    /// Not 802.11 we could parse, or no radiotap.
-    Unparsed,
-    /// 802.11, but not an AWDL action frame. The overwhelming majority.
-    OtherWifi,
+    /// No radiotap, or not 802.11 at all. Should be rare; if it is not, something
+    /// upstream is wrong and the number is worth seeing.
+    NotTrusted,
+    /// 802.11, but not AWDL. Counted BY TYPE rather than lumped together, because
+    /// "half the capture is unparseable" and "half the capture is ACKs" look identical
+    /// otherwise, and only one of them is a bug.
+    OtherWifi(FrameControl),
     Awdl { rt: Radiotap, dot11: Dot11, af: ActionFrame<'a> },
 }
 
 fn classify(pkt: &[u8]) -> Seen<'_> {
-    let Some(rt) = Radiotap::parse(pkt) else { return Seen::Unparsed };
-    let Some(body80211) = rt.payload(pkt) else { return Seen::Unparsed };
-    let Some(dot11) = Dot11::parse(body80211) else { return Seen::Unparsed };
-    if !dot11.is_action() {
-        return Seen::OtherWifi;
+    let Some(rt) = Radiotap::parse(pkt) else { return Seen::NotTrusted };
+    let Some(body80211) = rt.payload(pkt) else { return Seen::NotTrusted };
+    let Some(fc) = FrameControl::parse(body80211) else { return Seen::NotTrusted };
+    if !fc.is_action() {
+        return Seen::OtherWifi(fc);
     }
-    let Some(body) = dot11.body(body80211) else { return Seen::OtherWifi };
+    // Only now is the full 24-byte management header worth demanding.
+    let Some(dot11) = Dot11::parse(body80211) else { return Seen::OtherWifi(fc) };
+    let Some(body) = dot11.body(body80211) else { return Seen::OtherWifi(fc) };
     match ActionFrame::parse(body) {
         Some(af) => Seen::Awdl { rt, dot11, af },
-        None => Seen::OtherWifi,
+        None => Seen::OtherWifi(fc),
     }
 }
 
@@ -71,7 +76,8 @@ fn run<T: pcap::Activated + ?Sized>(mut cap: pcap::Capture<T>, stats_only: bool)
     let mut total: u64 = 0;
     let mut awdl_n: u64 = 0;
     let mut other: u64 = 0;
-    let mut unparsed: u64 = 0;
+    let mut not_trusted: u64 = 0;
+    let mut by_kind: BTreeMap<&'static str, u64> = BTreeMap::new();
     let mut by_subtype: BTreeMap<u8, u64> = BTreeMap::new();
     let mut by_tag: BTreeMap<u8, u64> = BTreeMap::new();
     let mut peers: BTreeMap<String, u64> = BTreeMap::new();
@@ -79,8 +85,11 @@ fn run<T: pcap::Activated + ?Sized>(mut cap: pcap::Capture<T>, stats_only: bool)
     while let Ok(pkt) = cap.next_packet() {
         total += 1;
         match classify(pkt.data) {
-            Seen::Unparsed => unparsed += 1,
-            Seen::OtherWifi => other += 1,
+            Seen::NotTrusted => not_trusted += 1,
+            Seen::OtherWifi(fc) => {
+                other += 1;
+                *by_kind.entry(fc.type_name()).or_default() += 1;
+            }
             Seen::Awdl { rt, dot11, af } => {
                 awdl_n += 1;
                 *by_subtype.entry(af.fixed.subtype).or_default() += 1;
@@ -95,7 +104,10 @@ fn run<T: pcap::Activated + ?Sized>(mut cap: pcap::Capture<T>, stats_only: bool)
         }
     }
 
-    eprintln!("\n--- {total} frames: {awdl_n} AWDL, {other} other 802.11, {unparsed} unparsed");
+    eprintln!("\n--- {total} frames: {awdl_n} AWDL, {other} other 802.11, {not_trusted} not 802.11");
+    for (k, n) in &by_kind {
+        eprintln!("  other {k:<12} {n}");
+    }
     if awdl_n == 0 {
         return;
     }
