@@ -152,23 +152,65 @@ there is an AP on 153 nearby, so it is tempting to read that as the AP's channel
 in the slots. It is more likely the other half of the 149+153 bond centred on 151 — the
 Legacy sequence reports 151 in exactly those slots. Not claimed either way.
 
+## 7. Every device keeps slot 8 on channel 6, without exception — and this corrects what we do
+
+Across all 278 frames and both channel sequences in each — **556 sequences** — channel 6
+appears exactly once, and always at **slot index 8**, the midpoint of the 16-slot cycle:
+
+```
+$ tshark ... | awk '{for(i=1;i<=NF;i++) if($i==6) print i-1}' | sort -n | uniq -c
+   556 8
+```
+
+Three different devices, every frame, no exceptions. The operating-class histogram agrees
+independently: class `0x51` (2.4 GHz) appears exactly 278 times, once per frame.
+
+**This is a cross-band rendezvous, and it is almost certainly deliberate.** A device whose
+useful traffic is on 5 GHz still guarantees it is listening on the 2.4 GHz social channel
+for one window in every sixteen. That is how a 5 GHz device meets a 2.4 GHz-only device,
+and how devices in different regulatory domains — Europe on 44, Qatar on 149 — still find
+each other. A fixed slot index means no negotiation is needed: everyone is there at the
+same point in the cycle.
+
+### What this corrects on our side
+
+`tarishd`'s `channels_for()` picks **one band**:
+
+```rust
+0              => vec![CHANNELS_24, CHANNELS_5],   // 2.4 first when unknown
+f if f >= 5000 => vec![CHANNELS_24, CHANNELS_5],   // Wi-Fi on 5 -> AWDL on 2.4
+_              => vec![CHANNELS_5,  CHANNELS_24],  // Wi-Fi on 2.4 -> AWDL on 5
+```
+
+with `CHANNELS_24 = [6]` and `CHANNELS_5 = [149, 44]`. The list is a **preference order**
+— the first set that starts is the one used — so a device ends up wholly on 2.4 **or**
+wholly on 5 GHz. It never occupies both, and our own devices were previously measured at
+16/16 slots on a single channel.
+
+That is why a 4383 forced to 2.4 GHz and a 4390 on 149 cannot discover each other, which
+was written up as an unavoidable trade-off for the operator to settle.
+
+**It is not a trade-off. Apple solved it, and the solution is one slot.**
+
+The concrete experiment, which needs no new code: pass a **combined** list such as
+`[149, 6]` to `mosey_start_5` rather than one band's set, and capture the channel
+sequence that results. If `libmosey` builds a mixed sequence, the cross-band cliff
+disappears and the per-mode channel choice proposed in BUILD-NOTES 59 stops needing a
+decision at all. If it does not, we have learned something specific about what `libmosey`
+will and will not schedule — which is equally useful, and is exactly the kind of thing our
+own implementation would then do differently.
+
+### And it re-explains an old measurement
+
+The iPhone figure from the Android work — 2.6-4.7 MB/s, 4 of 16 slots split across 149
+and 6 — was attributed to the radio. It is the schedule. Our device at 16/16 on one
+channel is already maximally available, so the ceiling is the peer's occupancy and not
+anything we can tune. **Slot occupancy, not link rate, is what governs AWDL throughput**,
+and any future capacity claim should be stated in slots.
+
 ---
 
-## Setup, and the one trap in it
+## Setup
 
-`~/awdl-up.sh` on the Pi. Three things that do not survive a reboot and one that is not
-stable at all:
+Moved to [SETUP.md](SETUP.md), with the rig, the build steps and the traps.
 
-- **rfkill soft-blocks every radio** until a country is set. `ip link set ... up` then
-  fails with `Operation not possible due to RF-kill`.
-- **The regulatory domain reverts to `country 00`**, which marks all of 5 GHz
-  `PASSIVE-SCAN`/no-IR — the radio may listen on 44 and 149 but not transmit.
-- **The phy index moves.** It was `phy2` before a reboot and `phy1` after. A hardcoded
-  index fails with `No such device (-19)`, which reads like the adapter is missing.
-- **The managed interface on the same phy must be DOWN.** This is the one that costs
-  real time, because it fails as a success: OWL reports `Channel 44 is available for
-  frame injection`, creates `awdl0`, and then every `send()` returns `EAGAIN` with
-  nothing in `dmesg`. The adapter is fine — `aireplay-ng -9` gets 30/30 on the same
-  radio at the same moment. `mt76` will not transmit from a monitor vif while another
-  vif on the phy is up, and will not let you set the channel either. Flipping the
-  primary interface to `type monitor` fails identically.

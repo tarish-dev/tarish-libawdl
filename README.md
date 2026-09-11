@@ -31,6 +31,23 @@ Broadcom driver exposes — and presents it as a mac80211 wiphy. AWDL therefore 
 timing. On commodity hardware (an ALFA AWUS036ACM on `mt76`) those come from mainline
 mac80211, which is why OWL runs on a Raspberry Pi with no Google code at all.
 
+## What has been established so far
+
+Every claim names the capture behind it — see [docs/FINDINGS.md](docs/FINDINGS.md).
+
+- The parser agrees with Wireshark **frame for frame**: both pick the same 278 of 6584.
+- Availability Window is **16 TU (16384 us)** and sequences are **16 slots** — the 2018
+  paper holds on 2026 devices.
+- **Every device keeps slot 8 on channel 6, in all 556 sequences observed.** A fixed
+  cross-band rendezvous. This corrects a real limitation in our Android stack, which
+  picks one band and stays there.
+- A device is **absent for most of its own schedule** (3/16 to 9/16 slots occupied).
+  Slot occupancy, not link rate, is what governs AWDL throughput.
+- A frame carries its schedule **twice, in two different encodings**.
+- Tags **32 and 33** are on the wire and in no published table.
+- `AP Beacon alignment delta` exists — evidence AWDL is designed to time-share with an
+  access point, not merely tolerate one.
+
 ## Layout
 
 ```
