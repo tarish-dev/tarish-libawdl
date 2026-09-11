@@ -150,3 +150,46 @@ fn sync_params() -> libawdl::sync::SyncParams {
         .and_then(|t| libawdl::sync::SyncParams::parse(t.value))
         .expect("every frame in the capture carries tag 4")
 }
+
+/// Election fields from a real Apple device.
+///
+/// Values cross-checked with `tshark -V` on the same capture: `Self Metric: 510`,
+/// `Distance to Master: 0`, and a `Self Counter` in the 68192-68194 range that
+/// increments across frames.
+#[test]
+fn election_parameters_decode_and_the_counter_is_live() {
+    let pkt = fixture_frame::FRAME;
+    let rt = Radiotap::parse(pkt).unwrap();
+    let b = rt.payload(pkt).unwrap();
+    let d = Dot11::parse(b).unwrap();
+    let af = ActionFrame::parse(d.body(b).unwrap()).unwrap();
+
+    let v1 = af
+        .tlvs()
+        .find(|t| t.tag == 5)
+        .and_then(|t| libawdl::election::ElectionParams::parse(t.value))
+        .expect("tag 5 present in every frame observed");
+
+    let v2 = af
+        .tlvs()
+        .find(|t| t.tag == 24)
+        .and_then(|t| libawdl::election::ElectionParamsV2::parse(t.value))
+        .expect("tag 24 present alongside tag 5, not instead of it");
+
+    // BOTH tags in one frame. A device advertises v1 and v2 simultaneously, so an
+    // implementation that emits only one is not doing what the devices do.
+    assert!(v1.self_metric > 0, "a real node advertises a real metric");
+    assert!(v2.self_metric > 0);
+
+    // The counter is the first term in the election ordering, and on a live device it
+    // is a large moving number rather than a placeholder. Our own stack advertises 0
+    // here -- see FINDINGS.md 9.
+    assert!(
+        v2.self_counter > 1000,
+        "a live master counter is a long-running value, not a small constant"
+    );
+
+    // v1 and v2 must agree about who the master is, or the two advertisements are
+    // telling peers different stories.
+    assert_eq!(v1.master, v2.master, "v1 and v2 name the same master");
+}

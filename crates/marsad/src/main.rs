@@ -17,6 +17,7 @@ use libawdl::{
     action::ActionFrame,
     dot11::{Dot11, FrameControl},
     radiotap::Radiotap,
+    election::{ElectionParams, ElectionParamsV2},
     sync::{ChannelSequence, SyncParams},
     tlv::Stop,
 };
@@ -87,6 +88,29 @@ fn print_frame(n: u64, rt: &Radiotap, d: &Dot11, af: &ActionFrame) {
                     );
                 }
             }
+            5 => {
+                if let Some(e) = ElectionParams::parse(t.value) {
+                    println!(
+                        "           distance {}  self_metric {}  master_metric {}  master {}",
+                        e.distance,
+                        e.self_metric,
+                        e.master_metric,
+                        libawdl::dot11::Mac(e.master),
+                    );
+                }
+            }
+            24 => {
+                if let Some(e) = ElectionParamsV2::parse(t.value) {
+                    println!(
+                        "           v2 distance {}  self {}#{}  master {}#{}",
+                        e.distance,
+                        e.self_metric,
+                        e.self_counter,
+                        e.master_metric,
+                        e.master_counter,
+                    );
+                }
+            }
             18 => {
                 if let Some(c) = ChannelSequence::parse(t.value) {
                     println!(
@@ -125,6 +149,9 @@ fn run<T: pcap::Activated + ?Sized>(mut cap: pcap::Capture<T>, stats_only: bool)
     let mut seq_shapes: BTreeMap<String, u64> = BTreeMap::new();
     let mut masters: BTreeMap<String, u64> = BTreeMap::new();
     let mut ap_align: BTreeMap<u16, u64> = BTreeMap::new();
+    // Election state per sender: the strongest claim each node made, and how often it
+    // said it was following someone else.
+    let mut claims: BTreeMap<String, (u32, u32, u64, u64)> = BTreeMap::new();
 
     while let Ok(pkt) = cap.next_packet() {
         total += 1;
@@ -161,6 +188,19 @@ fn run<T: pcap::Activated + ?Sized>(mut cap: pcap::Capture<T>, stats_only: bool)
                                 libawdl::dot11::Mac(sp.master).to_string()
                             };
                             *masters.entry(m).or_default() += 1;
+                        }
+                    }
+                    if t.tag == 24 {
+                        if let Some(e) = ElectionParamsV2::parse(t.value) {
+                            let k = dot11.src.to_string();
+                            let slot = claims.entry(k).or_insert((0, 0, 0, 0));
+                            slot.0 = slot.0.max(e.self_metric);
+                            slot.1 = slot.1.max(e.self_counter);
+                            if e.claims_mastership() {
+                                slot.2 += 1;
+                            } else {
+                                slot.3 += 1;
+                            }
                         }
                     }
                     if t.tag == 18 {
@@ -214,6 +254,12 @@ fn run<T: pcap::Activated + ?Sized>(mut cap: pcap::Capture<T>, stats_only: bool)
         eprintln!("AP beacon alignment delta:");
         for (d, n) in &ap_align {
             eprintln!("  {d}   in {n} frames");
+        }
+    }
+    if !claims.is_empty() {
+        eprintln!("election (per sender: best metric, best counter, frames claiming master / following):");
+        for (who, (metric, counter, master_n, follow_n)) in &claims {
+            eprintln!("  {who}  metric {metric:<12} counter {counter:<8} master {master_n:<5} following {follow_n}");
         }
     }
     if !masters.is_empty() {

@@ -266,6 +266,64 @@ assuming a peer's encoding, and a reminder that "what Apple does" and "what libm
 does" are two different reference points — we have been treating the second as though it
 were the first.
 
+## 9. Our election claim is a constant: metric 1, counter 0, for ever
+
+`captures/blazer-mix.pcap`. Our device and a real Apple device, same capture, same
+channel. Every value below cross-checked with `tshark -V`.
+
+| | ours (`libmosey`) | Apple |
+|---|---|---|
+| **Self Metric** | **1** | **510** |
+| **Self Counter** | **0**, in all 346 frames | **68192 -> 68193 -> 68194**, incrementing |
+| Distance to master | 0 in 514 advertisements, 1 in 178 | 0 throughout |
+
+AWDL decides an election on **(counter, metric, address)**, counter first. A node
+advertising counter 0 and metric 1 has made the weakest claim expressible. It cannot win
+against anything.
+
+**A counter that never moves while the peer's ticks is the signature of a field that is
+never maintained, not of a node that is losing fairly.** Apple's counter advanced three
+times in forty seconds; ours sat at zero for 346 consecutive frames.
+
+### The oscillation is the part that should worry us
+
+Our device did not simply lose and settle. It **alternated**: 514 advertisements at
+distance 0 — *I am the master* — against 178 at distance 1 naming the Apple device with
+its metric of 510.
+
+So within one forty-second capture our node repeatedly claimed a cluster it could not
+hold, yielded, and claimed it again. A node that keeps changing its mind about who the
+master is drags its availability windows with it every time, because the schedule is
+anchored to the master's timing. Two nodes that are each periodically master of their own
+cluster have no stable overlap at all.
+
+**This is a candidate mechanism for the oldest open bug in the Android work** — "sending
+does not find peers: we hear their questions, never their answers", reported as
+unreliable sending against reliable receiving. Receiving needs only that we are listening
+when they transmit; sending needs a shared schedule. That is a hypothesis with a
+plausible mechanism and a capture behind it, **not a diagnosis** — confirming it means
+capturing a failed send alongside the election state at that moment.
+
+### What libawdl must do differently
+
+1. **Maintain a real master counter** and increment it. It is the first term of the
+   comparison and a constant zero forfeits every election.
+2. **Advertise a metric that means something.** 1 against 510 is not a device that
+   modestly declines to lead; it is a field nobody filled in.
+3. **Do not claim and yield repeatedly.** Whatever hysteresis Apple applies, our stack
+   does not have it, and the cost lands on synchronisation rather than showing up as an
+   error.
+
+These are three requirements we would not have known to write down. They came out of
+putting our own frames and Apple's in one capture and reading them with the same parser —
+which is the whole argument for this project existing.
+
+### Both election tags ship together
+
+Every frame from both devices carries tag 5 **and** tag 24. v2 is not a replacement; a
+device advertises the old and new forms simultaneously, and the two name the same master.
+An implementation that emits only one is not doing what the devices do.
+
 ---
 
 ## Setup
