@@ -13,7 +13,7 @@
 
 use std::collections::BTreeMap;
 
-use awdl::{action::ActionFrame, dot11::{Dot11, FrameControl}, radiotap::Radiotap, tlv::Stop};
+use libawdl::{action::ActionFrame, dot11::{Dot11, FrameControl}, radiotap::Radiotap, tlv::Stop};
 
 /// What one captured frame turned out to be.
 enum Seen<'a> {
@@ -48,7 +48,7 @@ fn print_frame(n: u64, rt: &Radiotap, d: &Dot11, af: &ActionFrame) {
     let sig = rt.signal_dbm.map(|s| format!("{s} dBm")).unwrap_or_else(|| "?".into());
     println!(
         "#{n}  {}  {}  v{}.{}  {} -> {}  {}  {}  tx_delay={}",
-        awdl::action::subtype_name(af.fixed.subtype),
+        libawdl::action::subtype_name(af.fixed.subtype),
         freq,
         af.fixed.version_major,
         af.fixed.version_minor,
@@ -113,7 +113,7 @@ fn run<T: pcap::Activated + ?Sized>(mut cap: pcap::Capture<T>, stats_only: bool)
     }
     eprintln!("subtypes:");
     for (s, n) in &by_subtype {
-        eprintln!("  {:<6} {n}", awdl::action::subtype_name(*s));
+        eprintln!("  {:<6} {n}", libawdl::action::subtype_name(*s));
     }
     eprintln!("senders:");
     for (m, n) in &peers {
@@ -121,7 +121,7 @@ fn run<T: pcap::Activated + ?Sized>(mut cap: pcap::Capture<T>, stats_only: bool)
     }
     eprintln!("tags seen:");
     for (t, n) in &by_tag {
-        eprintln!("  [{:>2}] {:<28} {n}", t, awdl::tlv::tag_name(*t));
+        eprintln!("  [{:>2}] {:<28} {n}", t, libawdl::tlv::tag_name(*t));
     }
 }
 

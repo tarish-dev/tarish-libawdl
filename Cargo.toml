@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/awdl", "crates/marsad"]
+members = ["crates/libawdl", "crates/libawdl-hal", "crates/marsad"]
 
 [workspace.package]
 version = "0.1.0"

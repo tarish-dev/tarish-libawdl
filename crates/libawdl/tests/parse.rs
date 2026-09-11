@@ -7,10 +7,10 @@
 //! Real captures become fixtures in `captures/` and get their own tests; those pin
 //! semantics, which is a different question and needs a real Apple device to answer.
 
-use awdl::action::{ActionFrame, SUBTYPE_MIF};
-use awdl::dot11::Dot11;
-use awdl::radiotap::Radiotap;
-use awdl::tlv::{Stop, Tlvs};
+use libawdl::action::{ActionFrame, SUBTYPE_MIF};
+use libawdl::dot11::Dot11;
+use libawdl::radiotap::Radiotap;
+use libawdl::tlv::{Stop, Tlvs};
 
 /// Radiotap carrying TSFT and CHANNEL, which together exercise the 8-byte alignment
 /// rule that is the easiest thing to get wrong in this header.

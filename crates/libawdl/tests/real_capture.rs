@@ -10,9 +10,9 @@
 
 mod fixture_frame;
 
-use awdl::action::{ActionFrame, SUBTYPE_MIF};
-use awdl::dot11::{Dot11, FrameControl};
-use awdl::radiotap::Radiotap;
+use libawdl::action::{ActionFrame, SUBTYPE_MIF};
+use libawdl::dot11::{Dot11, FrameControl};
+use libawdl::radiotap::Radiotap;
 
 #[test]
 fn a_real_frame_from_a_real_apple_device_parses() {
@@ -38,13 +38,13 @@ fn a_real_frame_from_a_real_apple_device_parses() {
     // The tag region has to consume exactly, with nothing left over.
     let mut tlvs = af.tlvs();
     let tags: Vec<u8> = tlvs.by_ref().map(|t| t.tag).collect();
-    assert_eq!(tlvs.stop(), Some(awdl::tlv::Stop::Clean), "tags consume the region exactly");
+    assert_eq!(tlvs.stop(), Some(libawdl::tlv::Stop::Clean), "tags consume the region exactly");
 
     for required in [4u8, 5, 6, 18, 21] {
         assert!(
             tags.contains(&required),
             "a MIF carries tag {required} ({})",
-            awdl::tlv::tag_name(required)
+            libawdl::tlv::tag_name(required)
         );
     }
 }
@@ -70,6 +70,6 @@ fn undocumented_tags_are_preserved_not_discarded() {
          say so deliberately rather than deleting the test"
     );
     for t in unknown {
-        assert_eq!(awdl::tlv::tag_name(t), "unrecognised");
+        assert_eq!(libawdl::tlv::tag_name(t), "unrecognised");
     }
 }

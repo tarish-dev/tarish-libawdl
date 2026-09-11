@@ -6,5 +6,5 @@ license.workspace = true
 description = "Capture the air and pull AWDL out of it."
 
 [dependencies]
-awdl = { path = "../awdl" }
+libawdl = { path = "../libawdl" }
 pcap = "2"
