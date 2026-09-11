@@ -208,6 +208,64 @@ channel is already maximally available, so the ceiling is the peer's occupancy a
 anything we can tune. **Slot occupancy, not link rate, is what governs AWDL throughput**,
 and any future capacity claim should be stated in slots.
 
+## 8. libmosey will not build a cross-band sequence — the cheap fix does not exist
+
+The experiment proposed in finding 7, run on hardware the same day.
+
+`persist.tarish.channels=149,6` on a Pixel 10 Pro, forcing a **combined** two-band list
+into `mosey_start_5` instead of one band's set. The daemon accepted it:
+
+```
+tarishd: using persist.tarish.channels override: [149, 6]
+tarishd: AWDL session up, mode=Netlink, channel=149, country=QA
+```
+
+No rejection, no fallback, no complaint. So the question is not whether `libmosey` takes
+the list — it is what it does with it. `captures/blazer-mix.pcap`, 40s, our device and a
+real Apple device in the same capture on the same channel:
+
+| sender | channel sequence |
+|---|---|
+| **ours** (`56:ba:4f:f6:3a:44`, 346 frames) | `OpClass 16/16 slots -> [149]` |
+| **Apple** (`ce:6d:8b:0c:31:01`, 37 frames) | `OpClass 6/16 slots -> [6, 149]` |
+
+Apple's list, verbatim, with channel 6 in slot 8 exactly as finding 7 predicts:
+
+```
+149, 149, 149, 0, 0, 0, 0, 0, 6, 149, 149, 0, 0, 0, 0, 0
+```
+
+Ours has **no slot on channel 6 at all**, despite 6 being in the list we handed it.
+
+**`libmosey` takes the first channel and builds a single-channel 16/16 sequence.** The
+second entry is used as a fallback for starting the radio, not as a member of the
+schedule.
+
+### What this settles
+
+The cross-band cliff — a 2.4 GHz device and a 5 GHz device never discovering each other —
+**cannot be fixed at the integration layer.** There is no channel list, no property, no
+ordering that makes `libmosey` schedule two bands. It is not a configuration we have
+failed to find; it is a capability the library does not have.
+
+That moves the item out of "integration tuning" and into the case for `libawdl`:
+
+- **It is a requirement, not a nice-to-have.** Building a schedule that reserves slot 8
+  for channel 6 is something our own implementation must do, because nothing else can.
+- **We now have the target shape, measured.** Not inferred from a paper: a real device's
+  sequence, in a capture, next to ours for comparison.
+- **It is testable the same way.** The same Pi, the same parser, the same one-command
+  comparison — so the day `libawdl` builds a sequence, we can check it against Apple's
+  side by side rather than hoping.
+
+### A second divergence, noticed in passing
+
+In tag 4, `libmosey` encodes its embedded sequence as **OpClass**; the Apple device uses
+**Legacy**. Both are valid and peers evidently accept either. Worth knowing before
+assuming a peer's encoding, and a reminder that "what Apple does" and "what libmosey
+does" are two different reference points — we have been treating the second as though it
+were the first.
+
 ---
 
 ## Setup
