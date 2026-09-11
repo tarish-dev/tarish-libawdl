@@ -1,0 +1,10 @@
+[package]
+name = "marsad"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Capture the air and pull AWDL out of it."
+
+[dependencies]
+awdl = { path = "../awdl" }
+pcap = "2"
